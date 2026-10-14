@@ -1,11 +1,9 @@
 import { config } from "../config";
 import {
   applicationFeeForStore,
-  computeApplicationFeeCents,
+  chargeBreakdown,
   DEFAULT_CREDIT_FEE_PERCENT,
   DEFAULT_DEBIT_FEE_PERCENT,
-  DEFAULT_PIX_FEE_PERCENT,
-  totalWithFeesCents,
 } from "../lib/fees";
 import {
   mpCreatePreference,
@@ -69,19 +67,12 @@ const FEE_COLUMN: Record<string, string> = {
   debit_card: "taxa_debito_percent",
 };
 
-const FEE_BY_METHOD: Record<PayMethod, { field: keyof StoreRef; fallback: number }> = {
-  pix: { field: "taxa_pix_percent", fallback: DEFAULT_PIX_FEE_PERCENT },
-  credito: { field: "taxa_credito_percent", fallback: DEFAULT_CREDIT_FEE_PERCENT },
-  debito: { field: "taxa_debito_percent", fallback: DEFAULT_DEBIT_FEE_PERCENT },
-};
-
-/** Com repasse ligado, o cliente paga a taxa do meio que escolheu na loja e a loja recebe o valor cheio. */
+/** A taxa de serviço é sempre do cliente; a do cartão só quando a loja repassa. No Pix a taxa fica com a loja. */
 function chargeFor(store: StoreRef, totalCents: number, method: PayMethod) {
-  if (!store.repassar_taxas) return totalCents;
-  const { field, fallback } = FEE_BY_METHOD[method];
-  const percent = Number(store[field]);
-  const valid = Number.isFinite(percent) && percent >= 0 && percent < 20 ? percent : fallback;
-  return totalWithFeesCents(totalCents, valid);
+  if (!store.repassar_taxas || method === "pix") return chargeBreakdown(totalCents, null);
+  const percent = Number(method === "credito" ? store.taxa_credito_percent : store.taxa_debito_percent);
+  const fallback = method === "credito" ? DEFAULT_CREDIT_FEE_PERCENT : DEFAULT_DEBIT_FEE_PERCENT;
+  return chargeBreakdown(totalCents, Number.isFinite(percent) && percent >= 0 && percent < 20 ? percent : fallback);
 }
 
 function receiptUrl(store: StoreRef, order: { id: string; token_publico: string }) {
@@ -89,7 +80,7 @@ function receiptUrl(store: StoreRef, order: { id: string; token_publico: string 
   return `https://${host}/pedido/${order.id}?t=${order.token_publico}`;
 }
 
-/** Abre o Checkout Pro do pedido na conta da loja, com 1% de marketplace_fee. */
+/** Abre o Checkout Pro do pedido na conta da loja; a taxa de serviço vai para a Shopwag como marketplace_fee. */
 export async function createOrderCheckout(opts: { pedidoId: string; token: string; email: string; method: PayMethod }) {
   const admin = supabaseAdmin();
   if (!admin) {
@@ -123,8 +114,9 @@ export async function createOrderCheckout(opts: { pedidoId: string; token: strin
 
   const email = opts.email || order.email_pagador || "";
   if (!email) return { ok: false as const, status: 400, error: "Informe um e-mail válido para o pagamento." };
-  const chargeCents = chargeFor(store, order.total_centavos, opts.method);
-  const fee = applicationFeeForStore(creds.userId, computeApplicationFeeCents(chargeCents));
+  const charge = chargeFor(store, order.total_centavos, opts.method);
+  const chargeCents = charge.total;
+  const fee = applicationFeeForStore(creds.userId, charge.service);
   const [firstName, ...rest] = order.nome_completo.trim().split(/\s+/);
   const created = await mpCreatePreference(creds.accessToken, {
     method: opts.method,
@@ -146,7 +138,7 @@ export async function createOrderCheckout(opts: { pedidoId: string; token: strin
     .from("pedidos")
     .update({
       metodo_pagamento: opts.method,
-      taxa_plataforma_centavos: fee,
+      taxa_plataforma_centavos: charge.service,
       taxa_cliente_centavos: chargeCents - order.total_centavos,
       email_pagador: email,
     })
