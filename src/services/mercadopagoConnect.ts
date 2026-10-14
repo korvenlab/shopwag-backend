@@ -1,6 +1,6 @@
 import { randomBytes } from "crypto";
 import { mpConfigured } from "../config";
-import { DEFAULT_PIX_FEE_PERCENT, PLATFORM_FEE_PERCENT } from "../lib/fees";
+import { asReceivePlan, CREDIT_FEE_BY_PLAN, DEFAULT_PIX_FEE_PERCENT, PLATFORM_FEE_PERCENT } from "../lib/fees";
 import { mpAuthorizeUrl, mpExchangeCode, mpRefreshToken, type MpTokenResponse } from "../lib/mercadopago";
 import { openSecret, sealSecret, secretBoxConfigured } from "../lib/secretBox";
 import { supabaseAdmin } from "../lib/supabase";
@@ -33,13 +33,14 @@ async function feesView(lojaId: string) {
   const { data } = admin
     ? await admin
         .from("lojas")
-        .select("repassar_taxas, taxa_pix_percent, taxa_pix_observada_em")
+        .select("repassar_taxas, mp_prazo_recebimento, taxa_pix_percent, taxa_pix_observada_em")
         .eq("id", lojaId)
         .maybeSingle()
     : { data: null };
   return {
     platform_percent: PLATFORM_FEE_PERCENT,
     pass_fees: Boolean(data?.repassar_taxas),
+    plan: asReceivePlan(data?.mp_prazo_recebimento) ?? "na_hora",
     pix_percent: data ? Number(data.taxa_pix_percent) : DEFAULT_PIX_FEE_PERCENT,
     pix_observed_at: (data?.taxa_pix_observada_em as string | null | undefined) ?? null,
   };
@@ -66,8 +67,8 @@ export async function connectView(lojaId: string) {
   };
 }
 
-/** Lojista escolhe se o cliente paga as taxas. Mudar a taxa Pix à mão zera a calibração automática. */
-export async function updateFees(lojaId: string, input: { passFees?: unknown; pixPercent?: unknown }) {
+/** Lojista escolhe se o cliente paga as taxas. Trocar o prazo reinicia a taxa do crédito pela tabela do Mercado Pago. */
+export async function updateFees(lojaId: string, input: { passFees?: unknown; plan?: unknown }) {
   const admin = supabaseAdmin();
   if (!admin) {
     console.error("[taxas] SUPABASE_SECRET_KEY ausente");
@@ -75,11 +76,11 @@ export async function updateFees(lojaId: string, input: { passFees?: unknown; pi
   }
   const patch: Record<string, unknown> = {};
   if (input.passFees !== undefined) patch.repassar_taxas = input.passFees === true;
-  if (input.pixPercent !== undefined && input.pixPercent !== null && input.pixPercent !== "") {
-    const pix = Number(String(input.pixPercent).replace(",", "."));
-    if (!Number.isFinite(pix) || pix < 0 || pix >= 20) return fail(400, "Informe uma taxa Pix entre 0 e 20%.");
-    patch.taxa_pix_percent = Math.round(pix * 100) / 100;
-    patch.taxa_pix_observada_em = null;
+  if (input.plan !== undefined) {
+    const plan = asReceivePlan(input.plan);
+    if (!plan) return fail(400, "Escolha quando você recebe as vendas no crédito.");
+    patch.mp_prazo_recebimento = plan;
+    patch.taxa_credito_percent = CREDIT_FEE_BY_PLAN[plan];
   }
   if (Object.keys(patch).length === 0) return fail(400, "Nada para salvar.");
   const { error } = await admin.from("lojas").update(patch).eq("id", lojaId);

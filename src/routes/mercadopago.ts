@@ -34,8 +34,8 @@ mercadopagoRouter.delete("/connect", requireMerchant, async (_req, res) => {
 
 mercadopagoRouter.patch("/connect/fees", requireMerchant, async (req, res) => {
   const { lojaId } = merchant(res.locals);
-  const body = (req.body ?? {}) as { pass_fees?: unknown; pix_percent?: unknown };
-  const saved = await updateFees(lojaId, { passFees: body.pass_fees, pixPercent: body.pix_percent });
+  const body = (req.body ?? {}) as { pass_fees?: unknown; plan?: unknown };
+  const saved = await updateFees(lojaId, { passFees: body.pass_fees, plan: body.plan });
   if (!saved.ok) {
     res.status(saved.status).json({ error: saved.error });
     return;

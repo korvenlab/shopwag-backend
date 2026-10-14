@@ -16,7 +16,7 @@ Todas as chaves ficam nas variáveis de ambiente do Render. O frontend só conhe
 | --- | --- |
 | `GET /api/mercadopago/connect` | Status da conexão (Bearer do Supabase) |
 | `GET /api/mercadopago/connect/start` | URL de autorização do Mercado Pago |
-| `PATCH /api/mercadopago/connect/fees` | Repasse de taxas (`pass_fees`) e taxa Pix (`pix_percent`) |
+| `PATCH /api/mercadopago/connect/fees` | Repasse de taxas (`pass_fees`) e prazo de recebimento do crédito (`plan`: `na_hora`, `14_dias`, `30_dias`) |
 | `DELETE /api/mercadopago/connect` | Desconectar |
 | `GET /api/mercadopago/oauth/callback` | Retorno do OAuth, volta para `/dashboard/loja` |
 | `POST /api/mercadopago/pix` | Gera o Pix do pedido (`pedido_id`, `token`, `email`) |

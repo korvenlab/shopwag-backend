@@ -10,6 +10,14 @@ export const DEFAULT_PIX_FEE_PERCENT = 0.99;
 export const DEFAULT_CREDIT_FEE_PERCENT = 4.98;
 export const DEFAULT_DEBIT_FEE_PERCENT = 3.99;
 
+/** Taxa pública do crédito no Checkout Pro conforme o prazo de recebimento escolhido no Mercado Pago. */
+export const CREDIT_FEE_BY_PLAN = { na_hora: 4.98, "14_dias": 4.49, "30_dias": 3.98 } as const;
+export type ReceivePlan = keyof typeof CREDIT_FEE_BY_PLAN;
+
+export function asReceivePlan(value: unknown): ReceivePlan | null {
+  return typeof value === "string" && value in CREDIT_FEE_BY_PLAN ? (value as ReceivePlan) : null;
+}
+
 /** Taxa de serviço sobre produtos + frete. */
 export function serviceFeeCents(baseCents: number) {
   const base = Math.max(0, Math.round(baseCents));
