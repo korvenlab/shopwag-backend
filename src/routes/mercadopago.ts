@@ -61,15 +61,20 @@ mercadopagoRouter.get("/oauth/callback", async (req, res) => {
 });
 
 mercadopagoRouter.post("/checkout", async (req, res) => {
-  const body = (req.body ?? {}) as { pedido_id?: unknown; token?: unknown; email?: unknown };
+  const body = (req.body ?? {}) as { pedido_id?: unknown; token?: unknown; email?: unknown; metodo?: unknown };
   const pedidoId = String(body.pedido_id ?? "").trim();
   const token = String(body.token ?? "").trim();
   const email = String(body.email ?? "").trim();
+  const method = body.metodo === "pix" || body.metodo === "credito" || body.metodo === "debito" ? body.metodo : null;
   if (!isUuid(pedidoId) || !isUuid(token) || (email !== "" && !EMAIL.test(email))) {
     res.status(400).json({ error: "Informe um e-mail válido para o pagamento." });
     return;
   }
-  const result = await createOrderCheckout({ pedidoId, token, email });
+  if (!method) {
+    res.status(400).json({ error: "Escolha como quer pagar." });
+    return;
+  }
+  const result = await createOrderCheckout({ pedidoId, token, email, method });
   if (!result.ok) {
     res.status(result.status).json({ error: result.error });
     return;

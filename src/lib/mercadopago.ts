@@ -106,10 +106,16 @@ export type MpPayment = {
 
 export type MpPreference = { id: string; init_point: string };
 
-/** Checkout Pro na conta da loja: o cliente escolhe Pix ou cartão na página do Mercado Pago. */
+export type PayMethod = "pix" | "credito" | "debito";
+
+const PAYMENT_TYPES = ["ticket", "atm", "bank_transfer", "credit_card", "debit_card", "prepaid_card", "digital_currency", "digital_wallet"];
+const ALLOWED_TYPE: Record<PayMethod, string> = { pix: "bank_transfer", credito: "credit_card", debito: "debit_card" };
+
+/** Checkout Pro na conta da loja, liberando só o meio escolhido na loja (a taxa foi calculada para ele). */
 export function mpCreatePreference(
   token: string,
   input: {
+    method: PayMethod;
     amountCents: number;
     marketplaceFeeCents: number;
     title: string;
@@ -132,7 +138,10 @@ export function mpCreatePreference(
         name: input.firstName.slice(0, 60),
         surname: (input.lastName || input.firstName).slice(0, 60),
       },
-      payment_methods: { excluded_payment_types: [{ id: "ticket" }, { id: "atm" }], installments: 12 },
+      payment_methods: {
+        excluded_payment_types: PAYMENT_TYPES.filter((type) => type !== ALLOWED_TYPE[input.method]).map((id) => ({ id })),
+        installments: input.method === "credito" ? 12 : 1,
+      },
       back_urls: { success: input.returnUrl, pending: input.returnUrl, failure: input.returnUrl },
       auto_return: "approved",
       statement_descriptor: input.title.slice(0, 22),

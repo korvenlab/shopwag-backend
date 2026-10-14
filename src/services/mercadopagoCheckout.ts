@@ -3,9 +3,18 @@ import {
   applicationFeeForStore,
   computeApplicationFeeCents,
   DEFAULT_CREDIT_FEE_PERCENT,
+  DEFAULT_DEBIT_FEE_PERCENT,
+  DEFAULT_PIX_FEE_PERCENT,
   totalWithFeesCents,
 } from "../lib/fees";
-import { mpCreatePreference, mpGetPayment, mpProcessorFeeBrl, mpSearchPayments, type MpPayment } from "../lib/mercadopago";
+import {
+  mpCreatePreference,
+  mpGetPayment,
+  mpProcessorFeeBrl,
+  mpSearchPayments,
+  type MpPayment,
+  type PayMethod,
+} from "../lib/mercadopago";
 import { supabaseAdmin } from "../lib/supabase";
 import { storeAccessToken } from "./mercadopagoConnect";
 
@@ -15,7 +24,9 @@ type StoreRef = {
   dominio: string | null;
   mp_status: string | null;
   repassar_taxas: boolean;
+  taxa_pix_percent: number | string;
   taxa_credito_percent: number | string;
+  taxa_debito_percent: number | string;
 };
 
 type OrderPayRow = {
@@ -58,14 +69,18 @@ const FEE_COLUMN: Record<string, string> = {
   debit_card: "taxa_debito_percent",
 };
 
-/**
- * O meio de pagamento só é escolhido no Mercado Pago, então o repasse usa a taxa do crédito
- * (a maior): a loja recebe o valor cheio em qualquer meio.
- */
-function chargeFor(store: StoreRef, totalCents: number) {
+const FEE_BY_METHOD: Record<PayMethod, { field: keyof StoreRef; fallback: number }> = {
+  pix: { field: "taxa_pix_percent", fallback: DEFAULT_PIX_FEE_PERCENT },
+  credito: { field: "taxa_credito_percent", fallback: DEFAULT_CREDIT_FEE_PERCENT },
+  debito: { field: "taxa_debito_percent", fallback: DEFAULT_DEBIT_FEE_PERCENT },
+};
+
+/** Com repasse ligado, o cliente paga a taxa do meio que escolheu na loja e a loja recebe o valor cheio. */
+function chargeFor(store: StoreRef, totalCents: number, method: PayMethod) {
   if (!store.repassar_taxas) return totalCents;
-  const percent = Number(store.taxa_credito_percent);
-  const valid = Number.isFinite(percent) && percent >= 0 && percent < 20 ? percent : DEFAULT_CREDIT_FEE_PERCENT;
+  const { field, fallback } = FEE_BY_METHOD[method];
+  const percent = Number(store[field]);
+  const valid = Number.isFinite(percent) && percent >= 0 && percent < 20 ? percent : fallback;
   return totalWithFeesCents(totalCents, valid);
 }
 
@@ -75,7 +90,7 @@ function receiptUrl(store: StoreRef, order: { id: string; token_publico: string 
 }
 
 /** Abre o Checkout Pro do pedido na conta da loja, com 1% de marketplace_fee. */
-export async function createOrderCheckout(opts: { pedidoId: string; token: string; email: string }) {
+export async function createOrderCheckout(opts: { pedidoId: string; token: string; email: string; method: PayMethod }) {
   const admin = supabaseAdmin();
   if (!admin) {
     console.error("[checkout] SUPABASE_SECRET_KEY ausente");
@@ -85,7 +100,7 @@ export async function createOrderCheckout(opts: { pedidoId: string; token: strin
   const { data, error } = await admin
     .from("pedidos")
     .select(
-      "id, loja_id, token_publico, status_pagamento, total_centavos, nome_completo, email_pagador, lojas(nome, slug, dominio, mp_status, repassar_taxas, taxa_credito_percent)",
+      "id, loja_id, token_publico, status_pagamento, total_centavos, nome_completo, email_pagador, lojas(nome, slug, dominio, mp_status, repassar_taxas, taxa_pix_percent, taxa_credito_percent, taxa_debito_percent)",
     )
     .eq("id", opts.pedidoId)
     .maybeSingle();
@@ -108,10 +123,11 @@ export async function createOrderCheckout(opts: { pedidoId: string; token: strin
 
   const email = opts.email || order.email_pagador || "";
   if (!email) return { ok: false as const, status: 400, error: "Informe um e-mail válido para o pagamento." };
-  const chargeCents = chargeFor(store, order.total_centavos);
+  const chargeCents = chargeFor(store, order.total_centavos, opts.method);
   const fee = applicationFeeForStore(creds.userId, computeApplicationFeeCents(chargeCents));
   const [firstName, ...rest] = order.nome_completo.trim().split(/\s+/);
   const created = await mpCreatePreference(creds.accessToken, {
+    method: opts.method,
     amountCents: chargeCents,
     marketplaceFeeCents: fee,
     title: `Pedido ${order.id.slice(0, 8)} - ${store.nome}`,
@@ -129,6 +145,7 @@ export async function createOrderCheckout(opts: { pedidoId: string; token: strin
   await admin
     .from("pedidos")
     .update({
+      metodo_pagamento: opts.method,
       taxa_plataforma_centavos: fee,
       taxa_cliente_centavos: chargeCents - order.total_centavos,
       email_pagador: email,
