@@ -8,7 +8,7 @@ export const domainsRouter = Router();
 const TRY_AGAIN = "Não conseguimos ativar o endereço agora. Tente de novo em alguns minutos.";
 const RESERVED = new Set([
   "www", "app", "api", "admin", "painel", "dashboard", "mail", "email", "smtp", "ftp",
-  "blog", "ajuda", "suporte", "status", "cdn", "static", "wagoo", "shopwag",
+  "blog", "ajuda", "suporte", "status", "cdn", "static", "wagoo", "shopwag", "shop",
 ]);
 
 type AddressView = { host: string | null; status: "off" | "manual" | "pending" | "active" };
