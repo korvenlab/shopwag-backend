@@ -2,8 +2,36 @@ import { Router } from "express";
 import { config } from "../config";
 import { requireMerchant, type MerchantLocals } from "../lib/auth";
 import { mpWebhookSignatureValid } from "../lib/mercadopago";
-import { createOrderPix, isUuid, syncOrderPayment, syncPaymentById } from "../services/mercadopagoCheckout";
-import { completeConnect, connectView, disconnectStore, startConnect, updateFees } from "../services/mercadopagoConnect";
+import {
+  createOrderCardPayment,
+  createOrderPix,
+  isUuid,
+  syncOrderPayment,
+  syncPaymentById,
+} from "../services/mercadopagoCheckout";
+import {
+  completeConnect,
+  connectView,
+  disconnectStore,
+  startConnect,
+  storePublicKey,
+  updateFees,
+} from "../services/mercadopagoConnect";
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const CARD_ATTEMPTS_PER_HOUR = 6;
+const cardAttempts = new Map<string, number[]>();
+
+function cardAttemptAllowed(pedidoId: string) {
+  const now = Date.now();
+  const recent = (cardAttempts.get(pedidoId) ?? []).filter((at) => now - at < 60 * 60 * 1000);
+  if (recent.length >= CARD_ATTEMPTS_PER_HOUR) return false;
+  recent.push(now);
+  cardAttempts.set(pedidoId, recent);
+  if (cardAttempts.size > 5000) cardAttempts.delete(cardAttempts.keys().next().value as string);
+  return true;
+}
 
 export const mercadopagoRouter = Router();
 
@@ -63,11 +91,78 @@ mercadopagoRouter.post("/pix", async (req, res) => {
   const pedidoId = String(body.pedido_id ?? "").trim();
   const token = String(body.token ?? "").trim();
   const email = String(body.email ?? "").trim();
-  if (!isUuid(pedidoId) || !isUuid(token) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!isUuid(pedidoId) || !isUuid(token) || !EMAIL.test(email)) {
     res.status(400).json({ error: "Informe um e-mail válido para o Pix." });
     return;
   }
   const result = await createOrderPix({ pedidoId, token, email });
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.json(result);
+});
+
+mercadopagoRouter.get("/public-key", async (req, res) => {
+  const lojaId = String(req.query.loja || "");
+  if (!isUuid(lojaId)) {
+    res.status(400).json({ error: "Loja não encontrada." });
+    return;
+  }
+  const publicKey = await storePublicKey(lojaId);
+  if (!publicKey) {
+    res.status(409).json({ error: "Esta loja ainda não está recebendo cartão pelo site." });
+    return;
+  }
+  res.json({ public_key: publicKey });
+});
+
+mercadopagoRouter.post("/card", async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const pedidoId = String(body.pedido_id ?? "").trim();
+  const token = String(body.token ?? "").trim();
+  const email = String(body.email ?? "").trim();
+  const method = body.metodo === "debito" ? "debito" : body.metodo === "credito" ? "credito" : null;
+  const cardToken = String(body.card_token ?? "").trim();
+  const paymentMethodId = String(body.payment_method_id ?? "").trim();
+  const installments = Number(body.installments ?? 1);
+  const issuer = body.issuer_id == null || body.issuer_id === "" ? null : String(body.issuer_id);
+  const identification = body.identification as { type?: unknown; number?: unknown } | undefined;
+  if (
+    !isUuid(pedidoId) ||
+    !isUuid(token) ||
+    !EMAIL.test(email) ||
+    !method ||
+    !/^[\w-]{8,}$/.test(cardToken) ||
+    !/^[a-z_]{2,30}$/.test(paymentMethodId) ||
+    !Number.isInteger(installments) ||
+    installments < 1 ||
+    installments > 12 ||
+    (method === "debito" && installments !== 1)
+  ) {
+    res.status(400).json({ error: "Confira os dados do cartão." });
+    return;
+  }
+  if (!cardAttemptAllowed(pedidoId)) {
+    res.status(429).json({ error: "Muitas tentativas neste pedido. Pague com Pix ou tente mais tarde." });
+    return;
+  }
+  const result = await createOrderCardPayment({
+    pedidoId,
+    token,
+    email,
+    method,
+    card: {
+      cardToken,
+      paymentMethodId,
+      issuerId: issuer,
+      installments,
+      identification:
+        identification?.type && identification?.number
+          ? { type: String(identification.type), number: String(identification.number).replace(/\D/g, "") }
+          : null,
+    },
+  });
   if (!result.ok) {
     res.status(result.status).json({ error: result.error });
     return;

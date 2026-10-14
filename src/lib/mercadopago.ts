@@ -97,6 +97,7 @@ export type MpPayment = {
   id: number;
   status: string;
   status_detail?: string;
+  payment_type_id?: string;
   transaction_amount: number;
   external_reference?: string | null;
   date_of_expiration?: string | null;
@@ -135,6 +136,51 @@ export function mpCreatePixPayment(
         email: input.email,
         first_name: input.firstName.slice(0, 60),
         last_name: (input.lastName || input.firstName).slice(0, 60),
+      },
+    },
+  });
+}
+
+export type MpCardInput = {
+  cardToken: string;
+  paymentMethodId: string;
+  issuerId: string | null;
+  installments: number;
+  identification: { type: string; number: string } | null;
+};
+
+export function mpCreateCardPayment(
+  token: string,
+  input: MpCardInput & {
+    amountCents: number;
+    applicationFeeCents: number;
+    description: string;
+    externalReference: string;
+    idempotencyKey: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+  },
+) {
+  return mpRequest<MpPayment>("POST", "/v1/payments", {
+    token,
+    idempotencyKey: input.idempotencyKey,
+    body: {
+      transaction_amount: input.amountCents / 100,
+      ...(input.applicationFeeCents > 0 ? { application_fee: input.applicationFeeCents / 100 } : {}),
+      description: input.description.slice(0, 250),
+      external_reference: input.externalReference,
+      notification_url: mpWebhookUrl(),
+      token: input.cardToken,
+      payment_method_id: input.paymentMethodId,
+      ...(input.issuerId ? { issuer_id: input.issuerId } : {}),
+      installments: input.installments,
+      binary_mode: true,
+      payer: {
+        email: input.email,
+        first_name: input.firstName.slice(0, 60),
+        last_name: (input.lastName || input.firstName).slice(0, 60),
+        ...(input.identification ? { identification: input.identification } : {}),
       },
     },
   });
