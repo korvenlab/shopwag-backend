@@ -20,7 +20,16 @@ export async function requireMerchant(req: Request, res: Response, next: NextFun
     res.status(401).json({ error: "Sessão expirada" });
     return;
   }
-  const { data: store } = await admin.from("lojas").select("id").eq("owner_id", data.user.id).maybeSingle();
+  const { data: store, error: storeError } = await admin
+    .from("lojas")
+    .select("id")
+    .eq("owner_id", data.user.id)
+    .maybeSingle();
+  if (storeError) {
+    console.error("[auth] falha ao ler loja", storeError.message);
+    res.status(500).json({ error: "Não foi possível ler a loja." });
+    return;
+  }
   if (!store) {
     res.status(409).json({ error: "Crie a loja antes de conectar o Mercado Pago." });
     return;

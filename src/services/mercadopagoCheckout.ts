@@ -52,8 +52,12 @@ export async function createOrderPix(opts: { pedidoId: string; token: string; em
     )
     .eq("id", opts.pedidoId)
     .maybeSingle();
+  if (error) {
+    console.error("[pix] falha ao ler pedido", error.message);
+    return { ok: false as const, status: 500, error: "Não foi possível ler o pedido." };
+  }
   const order = data as OrderPayRow | null;
-  if (error || !order || order.token_publico !== opts.token) {
+  if (!order || order.token_publico !== opts.token) {
     return { ok: false as const, status: 404, error: "Pedido não encontrado." };
   }
   if (order.status_pagamento === "paid") {
@@ -142,11 +146,15 @@ async function calibratePixFee(lojaId: string, payment: MpPayment) {
 export async function syncOrderPayment(pedidoId: string, token: string) {
   const admin = supabaseAdmin();
   if (!admin) return { ok: false as const, status: 503, error: "Servidor sem SUPABASE_SECRET_KEY." };
-  const { data } = await admin
+  const { data, error } = await admin
     .from("pedidos")
     .select("id, loja_id, token_publico, status_pagamento, mp_payment_id")
     .eq("id", pedidoId)
     .maybeSingle();
+  if (error) {
+    console.error("[status] falha ao ler pedido", error.message);
+    return { ok: false as const, status: 500, error: "Não foi possível ler o pedido." };
+  }
   if (!data || data.token_publico !== token) return { ok: false as const, status: 404, error: "Pedido não encontrado." };
 
   const current = String(data.status_pagamento);

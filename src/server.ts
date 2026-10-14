@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { config } from "./config";
+import { supabaseAdmin } from "./lib/supabase";
 import { mercadopagoRouter } from "./routes/mercadopago";
 
 const app = express();
@@ -9,8 +10,14 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "100kb" }));
 
-app.get("/health", (_req, res) => {
-  res.json({ ok: true });
+app.get("/health", async (_req, res) => {
+  const admin = supabaseAdmin();
+  if (!admin) {
+    res.json({ ok: true, database: "missing_secret" });
+    return;
+  }
+  const { error } = await admin.from("lojas").select("id", { head: true, count: "exact" }).limit(1);
+  res.json({ ok: true, database: error ? "error" : "ok" });
 });
 
 // O webhook é chamado pelo Mercado Pago, sem Origin do navegador.
