@@ -33,3 +33,9 @@ services:
         sync: false
       - key: MP_OAUTH_TEST_TOKEN
         value: "false"
+      - key: VERCEL_TOKEN
+        sync: false
+      - key: VERCEL_PROJECT_ID
+        sync: false
+      - key: VERCEL_TEAM_ID
+        sync: false

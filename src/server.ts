@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { config } from "./config";
 import { supabaseAdmin } from "./lib/supabase";
+import { domainsRouter } from "./routes/domains";
 import { mercadopagoRouter } from "./routes/mercadopago";
 
 const app = express();
@@ -29,6 +30,16 @@ app.use(
     allowedHeaders: ["authorization", "content-type"],
   }),
   mercadopagoRouter,
+);
+
+app.use(
+  "/api/domains",
+  cors({
+    origin: (origin, callback) => callback(null, !origin || config.corsOrigins.includes(origin)),
+    methods: ["GET", "PUT", "DELETE"],
+    allowedHeaders: ["authorization", "content-type"],
+  }),
+  domainsRouter,
 );
 
 app.use((_req, res) => {

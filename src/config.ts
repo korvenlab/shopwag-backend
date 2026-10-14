@@ -22,6 +22,11 @@ export const config = {
     accessToken: env("MP_ACCESS_TOKEN"),
     oauthTestToken: env("MP_OAUTH_TEST_TOKEN").toLowerCase() === "true",
   },
+  vercel: {
+    token: env("VERCEL_TOKEN"),
+    projectId: env("VERCEL_PROJECT_ID"),
+    teamId: env("VERCEL_TEAM_ID"),
+  },
 };
 
 export function mpConfigured() {
