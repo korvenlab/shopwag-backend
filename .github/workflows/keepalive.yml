@@ -1,0 +1,19 @@
+name: Keepalive
+
+# Render free dorme após 15 min sem acesso e o Supabase free pausa após 7 dias;
+# o /health acorda o backend e consulta o banco.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /health
+        run: |
+          curl --fail --silent --show-error --max-time 90 \
+            --retry 3 --retry-delay 15 --retry-all-errors \
+            https://shopwag-backend.onrender.com/health
