@@ -178,18 +178,6 @@ export async function disconnectStore(lojaId: string) {
   await admin.from("lojas").update({ mp_status: "revoked" }).eq("id", lojaId);
 }
 
-/** Chave pública da conta da loja: o formulário de cartão gera o token com ela. */
-export async function storePublicKey(lojaId: string) {
-  const admin = supabaseAdmin();
-  if (!admin) return null;
-  const { data } = await admin
-    .from("loja_mp_contas")
-    .select("public_key, status")
-    .eq("loja_id", lojaId)
-    .maybeSingle();
-  return data?.status === "connected" ? (data.public_key as string) : null;
-}
-
 /** Token da loja para cobrar em nome dela, renovando quando faltam menos de 7 dias. */
 export async function storeAccessToken(lojaId: string) {
   const admin = supabaseAdmin();

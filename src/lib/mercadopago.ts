@@ -100,90 +100,55 @@ export type MpPayment = {
   payment_type_id?: string;
   transaction_amount: number;
   external_reference?: string | null;
-  date_of_expiration?: string | null;
+  date_created?: string;
   fee_details?: { type?: string; amount?: number }[];
-  point_of_interaction?: {
-    transaction_data?: { qr_code?: string; qr_code_base64?: string };
-  };
 };
 
-export function mpCreatePixPayment(
+export type MpPreference = { id: string; init_point: string };
+
+/** Checkout Pro na conta da loja: o cliente escolhe Pix ou cartão na página do Mercado Pago. */
+export function mpCreatePreference(
   token: string,
   input: {
     amountCents: number;
-    applicationFeeCents: number;
-    description: string;
+    marketplaceFeeCents: number;
+    title: string;
     externalReference: string;
-    idempotencyKey: string;
     email: string;
     firstName: string;
     lastName: string;
-    expiresAt: string;
+    returnUrl: string;
   },
 ) {
-  return mpRequest<MpPayment>("POST", "/v1/payments", {
+  return mpRequest<MpPreference>("POST", "/checkout/preferences", {
     token,
-    idempotencyKey: input.idempotencyKey,
     body: {
-      transaction_amount: input.amountCents / 100,
-      ...(input.applicationFeeCents > 0 ? { application_fee: input.applicationFeeCents / 100 } : {}),
-      description: input.description.slice(0, 250),
+      items: [{ title: input.title.slice(0, 250), quantity: 1, unit_price: input.amountCents / 100, currency_id: "BRL" }],
+      ...(input.marketplaceFeeCents > 0 ? { marketplace_fee: input.marketplaceFeeCents / 100 } : {}),
       external_reference: input.externalReference,
       notification_url: mpWebhookUrl(),
-      payment_method_id: "pix",
-      date_of_expiration: input.expiresAt,
       payer: {
         email: input.email,
-        first_name: input.firstName.slice(0, 60),
-        last_name: (input.lastName || input.firstName).slice(0, 60),
+        name: input.firstName.slice(0, 60),
+        surname: (input.lastName || input.firstName).slice(0, 60),
       },
+      payment_methods: { excluded_payment_types: [{ id: "ticket" }, { id: "atm" }], installments: 12 },
+      back_urls: { success: input.returnUrl, pending: input.returnUrl, failure: input.returnUrl },
+      auto_return: "approved",
+      statement_descriptor: input.title.slice(0, 22),
     },
   });
 }
 
-export type MpCardInput = {
-  cardToken: string;
-  paymentMethodId: string;
-  issuerId: string | null;
-  installments: number;
-  identification: { type: string; number: string } | null;
-};
-
-export function mpCreateCardPayment(
-  token: string,
-  input: MpCardInput & {
-    amountCents: number;
-    applicationFeeCents: number;
-    description: string;
-    externalReference: string;
-    idempotencyKey: string;
-    email: string;
-    firstName: string;
-    lastName: string;
-  },
-) {
-  return mpRequest<MpPayment>("POST", "/v1/payments", {
-    token,
-    idempotencyKey: input.idempotencyKey,
-    body: {
-      transaction_amount: input.amountCents / 100,
-      ...(input.applicationFeeCents > 0 ? { application_fee: input.applicationFeeCents / 100 } : {}),
-      description: input.description.slice(0, 250),
-      external_reference: input.externalReference,
-      notification_url: mpWebhookUrl(),
-      token: input.cardToken,
-      payment_method_id: input.paymentMethodId,
-      ...(input.issuerId ? { issuer_id: input.issuerId } : {}),
-      installments: input.installments,
-      binary_mode: true,
-      payer: {
-        email: input.email,
-        first_name: input.firstName.slice(0, 60),
-        last_name: (input.lastName || input.firstName).slice(0, 60),
-        ...(input.identification ? { identification: input.identification } : {}),
-      },
-    },
+/** Pagamentos da conta da loja ligados a um pedido, do mais recente para o mais antigo. */
+export function mpSearchPayments(token: string, externalReference: string) {
+  const params = new URLSearchParams({
+    external_reference: externalReference,
+    sort: "date_created",
+    criteria: "desc",
+    limit: "10",
   });
+  return mpRequest<{ results?: MpPayment[] }>("GET", `/v1/payments/search?${params.toString()}`, { token });
 }
 
 /** Taxa de processamento que o Mercado Pago cobrou da loja, em reais. */
