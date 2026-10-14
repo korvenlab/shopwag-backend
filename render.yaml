@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: shopwag-backend
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SUPABASE_URL
+        value: https://kclhtupbsnflpviausmo.supabase.co
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: MP_CLIENT_ID
+        sync: false
+      - key: MP_CLIENT_SECRET
+        sync: false
+      - key: MP_OAUTH_REDIRECT_URI
+        sync: false
+      - key: MP_WEBHOOK_URL
+        sync: false
+      - key: MP_WEBHOOK_SECRET
+        sync: false
+      - key: MP_TOKEN_SECRET
+        generateValue: true
+      - key: MP_PLATFORM_USER_ID
+        sync: false
+      - key: MP_OAUTH_TEST_TOKEN
+        value: "false"
