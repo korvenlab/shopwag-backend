@@ -22,6 +22,7 @@ export const config = {
     accessToken: env("MP_ACCESS_TOKEN"),
     oauthTestToken: env("MP_OAUTH_TEST_TOKEN").toLowerCase() === "true",
   },
+  storeDomain: (env("STORE_DOMAIN") || "wagoobot.com").toLowerCase(),
   vercel: {
     token: env("VERCEL_TOKEN"),
     projectId: env("VERCEL_PROJECT_ID"),

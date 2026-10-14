@@ -36,7 +36,7 @@ app.use(
   "/api/domains",
   cors({
     origin: (origin, callback) => callback(null, !origin || config.corsOrigins.includes(origin)),
-    methods: ["GET", "PUT", "DELETE"],
+    methods: ["GET", "POST"],
     allowedHeaders: ["authorization", "content-type"],
   }),
   domainsRouter,

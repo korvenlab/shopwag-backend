@@ -5,16 +5,13 @@ import { supabaseAdmin } from "../lib/supabase";
 
 export const domainsRouter = Router();
 
-const DOMAIN = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
-const RESERVED = /(^|\.)(vercel\.app|onrender\.com|shopwag\.com\.br)$/;
-const TRY_AGAIN = "Não conseguimos configurar o domínio agora. Tente de novo em alguns minutos.";
+const TRY_AGAIN = "Não conseguimos ativar o endereço agora. Tente de novo em alguns minutos.";
+const RESERVED = new Set([
+  "www", "app", "api", "admin", "painel", "dashboard", "mail", "email", "smtp", "ftp",
+  "blog", "ajuda", "suporte", "status", "cdn", "static", "wagoo", "shopwag",
+]);
 
-type DomainStatus = "none" | "pending" | "active" | "manual";
-type DomainView = {
-  dominio: string | null;
-  status: DomainStatus;
-  records: Array<{ type: string; name: string; value: string }>;
-};
+type AddressView = { host: string | null; status: "off" | "manual" | "pending" | "active" };
 
 function lojaId(locals: Record<string, unknown>) {
   return (locals.merchant as MerchantLocals).lojaId;
@@ -35,85 +32,61 @@ async function vercel(path: string, init: RequestInit = {}) {
   return { ok: response.ok, status: response.status, data };
 }
 
-function dnsRecords(domain: string) {
-  const labels = domain.split(".").length;
-  const secondLevel = /\.(com|net|org|art|blog|eco|app|tec|ind|adv)\.br$/.test(domain);
-  return labels === (secondLevel ? 3 : 2)
-    ? [{ type: "A", name: "@", value: "76.76.21.21" }]
-    : [{ type: "CNAME", name: domain.split(".")[0], value: "cname.vercel-dns.com" }];
+function hostFor(slug: string) {
+  if (!config.storeDomain || RESERVED.has(slug) || !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(slug)) return null;
+  return `${slug}.${config.storeDomain}`;
 }
 
-async function view(domain: string | null): Promise<DomainView> {
-  if (!domain) return { dominio: null, status: "none", records: [] };
-  const records = dnsRecords(domain);
-  if (!vercelReady()) return { dominio: domain, status: "manual", records };
-  const project = config.vercel.projectId;
-  const [info, dns] = await Promise.all([
-    vercel(`/v9/projects/${project}/domains/${domain}`),
-    vercel(`/v6/domains/${domain}/config`),
-  ]);
-  const verification = Array.isArray(info.data.verification)
-    ? (info.data.verification as Array<{ type: string; domain: string; value: string }>).map((item) => ({
-        type: item.type,
-        name: item.domain,
-        value: item.value,
-      }))
-    : [];
-  const active = info.ok && info.data.verified === true && dns.ok && dns.data.misconfigured === false;
-  return { dominio: domain, status: active ? "active" : "pending", records: [...records, ...verification] };
+async function loadStore(id: string) {
+  const { data } = await supabaseAdmin()!.from("lojas").select("slug, dominio").eq("id", id).maybeSingle();
+  return data as { slug: string; dominio: string | null } | null;
 }
 
-async function currentDomain(id: string) {
-  const admin = supabaseAdmin();
-  const { data } = await admin!.from("lojas").select("dominio").eq("id", id).maybeSingle();
-  return (data?.dominio as string | null) ?? null;
+async function view(host: string | null, activated: boolean): Promise<AddressView> {
+  if (!host) return { host: null, status: "off" };
+  if (!vercelReady()) return { host, status: "manual" };
+  if (!activated) return { host, status: "pending" };
+  const info = await vercel(`/v9/projects/${config.vercel.projectId}/domains/${host}`);
+  return { host, status: info.ok && info.data.verified === true ? "active" : "pending" };
 }
 
 domainsRouter.get("/", requireMerchant, async (_req, res) => {
-  res.json(await view(await currentDomain(lojaId(res.locals))));
+  const store = await loadStore(lojaId(res.locals));
+  const host = store ? hostFor(store.slug) : null;
+  res.json(await view(host, Boolean(host && store?.dominio === host)));
 });
 
-domainsRouter.put("/", requireMerchant, async (req, res) => {
+/** Liga {slug}.STORE_DOMAIN ao projeto da Vercel. Chamado ao salvar a loja ou trocar o endereço. */
+domainsRouter.post("/sync", requireMerchant, async (_req, res) => {
   const id = lojaId(res.locals);
-  const domain = String((req.body ?? {}).dominio ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/.*$/, "");
-  if (!DOMAIN.test(domain) || RESERVED.test(domain)) {
-    res.status(400).json({ error: "Confira o domínio. Exemplo: www.sualoja.com.br" });
+  const store = await loadStore(id);
+  const host = store ? hostFor(store.slug) : null;
+  if (!store || !host) {
+    res.json(await view(null, false));
     return;
   }
-  const previous = await currentDomain(id);
-  const admin = supabaseAdmin()!;
-  const { error } = await admin.from("lojas").update({ dominio: domain }).eq("id", id);
-  if (error) {
-    const taken = error.code === "23505";
-    if (!taken) console.error("[domains] falha ao salvar", error.message);
-    res.status(taken ? 409 : 500).json({ error: taken ? "Esse domínio já está em uso por outra loja." : TRY_AGAIN });
+  if (!vercelReady()) {
+    res.json(await view(host, false));
     return;
   }
-  if (vercelReady()) {
-    const project = config.vercel.projectId;
-    if (previous && previous !== domain) await vercel(`/v9/projects/${project}/domains/${previous}`, { method: "DELETE" });
-    const added = await vercel(`/v10/projects/${project}/domains`, { method: "POST", body: JSON.stringify({ name: domain }) });
+  const project = config.vercel.projectId;
+  if (store.dominio && store.dominio !== host) {
+    await vercel(`/v9/projects/${project}/domains/${store.dominio}`, { method: "DELETE" });
+  }
+  if (store.dominio !== host) {
+    const added = await vercel(`/v10/projects/${project}/domains`, { method: "POST", body: JSON.stringify({ name: host }) });
     const code = (added.data.error as { code?: string } | undefined)?.code;
     if (!added.ok && code !== "domain_already_in_use" && code !== "domain_already_exists") {
       console.error("[domains] vercel recusou", added.status, JSON.stringify(added.data).slice(0, 300));
-      await admin.from("lojas").update({ dominio: previous }).eq("id", id);
-      res.status(502).json({ error: added.status === 409 ? "Esse domínio já está ligado a outro site." : TRY_AGAIN });
+      res.status(502).json({ error: TRY_AGAIN });
+      return;
+    }
+    const { error } = await supabaseAdmin()!.from("lojas").update({ dominio: host }).eq("id", id);
+    if (error) {
+      console.error("[domains] falha ao salvar", error.message);
+      res.status(500).json({ error: TRY_AGAIN });
       return;
     }
   }
-  res.json(await view(domain));
-});
-
-domainsRouter.delete("/", requireMerchant, async (_req, res) => {
-  const id = lojaId(res.locals);
-  const previous = await currentDomain(id);
-  if (previous && vercelReady()) {
-    await vercel(`/v9/projects/${config.vercel.projectId}/domains/${previous}`, { method: "DELETE" });
-  }
-  await supabaseAdmin()!.from("lojas").update({ dominio: null }).eq("id", id);
-  res.json(await view(null));
+  res.json(await view(host, true));
 });

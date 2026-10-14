@@ -33,6 +33,8 @@ services:
         sync: false
       - key: MP_OAUTH_TEST_TOKEN
         value: "false"
+      - key: STORE_DOMAIN
+        value: wagoobot.com
       - key: VERCEL_TOKEN
         sync: false
       - key: VERCEL_PROJECT_ID
