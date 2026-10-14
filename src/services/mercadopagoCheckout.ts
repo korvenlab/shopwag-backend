@@ -23,6 +23,9 @@ type OrderPayRow = {
   lojas: StoreRef | StoreRef[] | null;
 };
 
+const PAYMENT_UNAVAILABLE = "Pagamento indisponível no momento. Tente de novo em alguns minutos.";
+const TALK_TO_STORE = "Esta loja ainda não está recebendo Pix pelo site. Fale com a loja pelo WhatsApp para combinar o pagamento.";
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isUuid(value: string) {
@@ -43,7 +46,10 @@ function pixFeePercent(store: StoreRef) {
 /** Gera (ou reaproveita) o Pix do pedido na conta da loja, com 1% de application_fee. */
 export async function createOrderPix(opts: { pedidoId: string; token: string; email: string }) {
   const admin = supabaseAdmin();
-  if (!admin) return { ok: false as const, status: 503, error: "Servidor sem SUPABASE_SECRET_KEY." };
+  if (!admin) {
+    console.error("[pix] SUPABASE_SECRET_KEY ausente");
+    return { ok: false as const, status: 503, error: PAYMENT_UNAVAILABLE };
+  }
 
   const { data, error } = await admin
     .from("pedidos")
@@ -54,7 +60,7 @@ export async function createOrderPix(opts: { pedidoId: string; token: string; em
     .maybeSingle();
   if (error) {
     console.error("[pix] falha ao ler pedido", error.message);
-    return { ok: false as const, status: 500, error: "Não foi possível ler o pedido." };
+    return { ok: false as const, status: 500, error: PAYMENT_UNAVAILABLE };
   }
   const order = data as OrderPayRow | null;
   if (!order || order.token_publico !== opts.token) {
@@ -66,7 +72,7 @@ export async function createOrderPix(opts: { pedidoId: string; token: string; em
 
   const store = Array.isArray(order.lojas) ? order.lojas[0] : order.lojas;
   if (!store || store.mp_status !== "connected") {
-    return { ok: false as const, status: 409, error: "Esta loja ainda não conectou o Mercado Pago." };
+    return { ok: false as const, status: 409, error: TALK_TO_STORE };
   }
 
   const stillValid =
@@ -76,7 +82,7 @@ export async function createOrderPix(opts: { pedidoId: string; token: string; em
   }
 
   const creds = await storeAccessToken(order.loja_id);
-  if (!creds) return { ok: false as const, status: 409, error: "A loja precisa reconectar o Mercado Pago." };
+  if (!creds) return { ok: false as const, status: 409, error: TALK_TO_STORE };
 
   const chargeCents = store.repassar_taxas
     ? totalWithFeesCents(order.total_centavos, pixFeePercent(store))
@@ -96,10 +102,11 @@ export async function createOrderPix(opts: { pedidoId: string; token: string; em
     expiresAt,
   });
   if (!created.ok) {
+    console.error("[pix] Mercado Pago recusou a cobrança", created.error);
     if (/without key enabled for QR/i.test(created.error)) {
-      return { ok: false as const, status: 409, error: "A conta Mercado Pago da loja ainda não tem chave Pix." };
+      return { ok: false as const, status: 409, error: TALK_TO_STORE };
     }
-    return { ok: false as const, status: 502, error: created.error };
+    return { ok: false as const, status: 502, error: "Não conseguimos gerar o Pix agora. Tente de novo em instantes." };
   }
 
   const payment = created.data;
@@ -145,7 +152,10 @@ async function calibratePixFee(lojaId: string, payment: MpPayment) {
 /** Relê o pagamento no Mercado Pago. Nunca confia em status vindo do navegador ou do corpo do webhook. */
 export async function syncOrderPayment(pedidoId: string, token: string) {
   const admin = supabaseAdmin();
-  if (!admin) return { ok: false as const, status: 503, error: "Servidor sem SUPABASE_SECRET_KEY." };
+  if (!admin) {
+    console.error("[status] SUPABASE_SECRET_KEY ausente");
+    return { ok: false as const, status: 503, error: PAYMENT_UNAVAILABLE };
+  }
   const { data, error } = await admin
     .from("pedidos")
     .select("id, loja_id, token_publico, status_pagamento, mp_payment_id")
@@ -153,7 +163,7 @@ export async function syncOrderPayment(pedidoId: string, token: string) {
     .maybeSingle();
   if (error) {
     console.error("[status] falha ao ler pedido", error.message);
-    return { ok: false as const, status: 500, error: "Não foi possível ler o pedido." };
+    return { ok: false as const, status: 500, error: PAYMENT_UNAVAILABLE };
   }
   if (!data || data.token_publico !== token) return { ok: false as const, status: 404, error: "Pedido não encontrado." };
 

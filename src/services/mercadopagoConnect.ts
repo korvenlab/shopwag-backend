@@ -21,6 +21,9 @@ type MpAccountRow = {
 
 type Fail = { ok: false; status: number; error: string };
 
+const CONNECT_SOON = "A conexão com o Mercado Pago estará disponível em breve. Tente de novo mais tarde.";
+const TRY_AGAIN = "Não conseguimos concluir agora. Tente de novo em alguns minutos.";
+
 function fail(status: number, error: string): Fail {
   return { ok: false, status, error };
 }
@@ -66,26 +69,33 @@ export async function connectView(lojaId: string) {
 /** Lojista escolhe se o cliente paga as taxas. Mudar a taxa Pix à mão zera a calibração automática. */
 export async function updateFees(lojaId: string, input: { passFees?: unknown; pixPercent?: unknown }) {
   const admin = supabaseAdmin();
-  if (!admin) return fail(503, "Servidor sem SUPABASE_SECRET_KEY.");
+  if (!admin) {
+    console.error("[taxas] SUPABASE_SECRET_KEY ausente");
+    return fail(503, TRY_AGAIN);
+  }
   const patch: Record<string, unknown> = {};
   if (input.passFees !== undefined) patch.repassar_taxas = input.passFees === true;
   if (input.pixPercent !== undefined && input.pixPercent !== null && input.pixPercent !== "") {
     const pix = Number(String(input.pixPercent).replace(",", "."));
-    if (!Number.isFinite(pix) || pix < 0 || pix >= 20) return fail(400, "Taxa Pix inválida.");
+    if (!Number.isFinite(pix) || pix < 0 || pix >= 20) return fail(400, "Informe uma taxa Pix entre 0 e 20%.");
     patch.taxa_pix_percent = Math.round(pix * 100) / 100;
     patch.taxa_pix_observada_em = null;
   }
   if (Object.keys(patch).length === 0) return fail(400, "Nada para salvar.");
   const { error } = await admin.from("lojas").update(patch).eq("id", lojaId);
-  if (error) return fail(500, "Não foi possível salvar as taxas.");
+  if (error) {
+    console.error("[taxas] falha ao salvar", error.message);
+    return fail(500, TRY_AGAIN);
+  }
   return { ok: true as const };
 }
 
 export async function startConnect(lojaId: string) {
-  if (!mpConfigured()) return fail(503, "Mercado Pago ainda não configurado no servidor.");
-  if (!secretBoxConfigured()) return fail(503, "Servidor sem MP_TOKEN_SECRET.");
   const admin = supabaseAdmin();
-  if (!admin) return fail(503, "Servidor sem SUPABASE_SECRET_KEY.");
+  if (!mpConfigured() || !secretBoxConfigured() || !admin) {
+    console.error("[mp] conexão indisponível: confira MP_CLIENT_ID/SECRET, MP_TOKEN_SECRET e SUPABASE_SECRET_KEY");
+    return fail(503, CONNECT_SOON);
+  }
 
   await admin.from("mp_oauth_states").delete().lt("expira_em", new Date().toISOString());
   const state = randomBytes(24).toString("hex");
@@ -94,7 +104,10 @@ export async function startConnect(lojaId: string) {
     loja_id: lojaId,
     expira_em: new Date(Date.now() + STATE_TTL_MS).toISOString(),
   });
-  if (error) return fail(500, "Não foi possível iniciar a conexão.");
+  if (error) {
+    console.error("[mp] falha ao gravar state", error.message);
+    return fail(500, TRY_AGAIN);
+  }
   return { ok: true as const, url: mpAuthorizeUrl(state) };
 }
 
@@ -106,8 +119,11 @@ function expiresAt(token: MpTokenResponse) {
 
 export async function completeConnect(state: string, code: string) {
   const admin = supabaseAdmin();
-  if (!admin) return fail(503, "Servidor sem SUPABASE_SECRET_KEY.");
-  if (!/^[0-9a-f]{48}$/.test(state)) return fail(400, "Link de conexão inválido.");
+  if (!admin) {
+    console.error("[mp] SUPABASE_SECRET_KEY ausente no retorno da conexão");
+    return fail(503, TRY_AGAIN);
+  }
+  if (!/^[0-9a-f]{48}$/.test(state)) return fail(400, "Este link de conexão não vale mais. Clique em Conectar de novo.");
 
   const { data: consumed } = await admin
     .from("mp_oauth_states")
@@ -116,14 +132,18 @@ export async function completeConnect(state: string, code: string) {
     .gt("expira_em", new Date().toISOString())
     .select("loja_id");
   const lojaId = consumed?.[0]?.loja_id as string | undefined;
-  if (!lojaId) return fail(400, "Link de conexão expirado. Conecte de novo.");
-  if (!code) return fail(400, "O Mercado Pago não devolveu o código.");
+  if (!lojaId) return fail(400, "A conexão demorou demais. Clique em Conectar de novo.");
+  if (!code) return fail(400, "O Mercado Pago não concluiu a conexão. Tente de novo.");
 
   const token = await mpExchangeCode(code);
-  if (!token.ok) return fail(502, token.error);
+  if (!token.ok) {
+    console.error("[mp] troca do código falhou", token.error);
+    return fail(502, "O Mercado Pago não concluiu a conexão. Tente de novo.");
+  }
   const account = token.data;
   if (!account.access_token || !account.refresh_token || !account.public_key || account.user_id == null) {
-    return fail(502, "O Mercado Pago não devolveu os dados da conta.");
+    console.error("[mp] resposta OAuth incompleta");
+    return fail(502, "O Mercado Pago não concluiu a conexão. Tente de novo.");
   }
 
   const now = new Date().toISOString();
@@ -142,7 +162,10 @@ export async function completeConnect(state: string, code: string) {
     },
     { onConflict: "loja_id" },
   );
-  if (error) return fail(500, "Não foi possível salvar a conexão.");
+  if (error) {
+    console.error("[mp] falha ao salvar conexão", error.message);
+    return fail(500, TRY_AGAIN);
+  }
 
   await admin.from("lojas").update({ mp_status: "connected" }).eq("id", lojaId);
   return { ok: true as const, lojaId };

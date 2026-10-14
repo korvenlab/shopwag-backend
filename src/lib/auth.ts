@@ -7,17 +7,18 @@ export type MerchantLocals = { userId: string; lojaId: string };
 export async function requireMerchant(req: Request, res: Response, next: NextFunction) {
   const admin = supabaseAdmin();
   if (!admin) {
-    res.status(503).json({ error: "Servidor sem SUPABASE_SECRET_KEY." });
+    console.error("[auth] SUPABASE_SECRET_KEY ausente");
+    res.status(503).json({ error: "Pagamentos indisponíveis no momento. Tente de novo em alguns minutos." });
     return;
   }
   const token = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!token) {
-    res.status(401).json({ error: "Não autenticado" });
+    res.status(401).json({ error: "Entre na sua conta para continuar." });
     return;
   }
   const { data, error } = await admin.auth.getUser(token);
   if (error || !data.user) {
-    res.status(401).json({ error: "Sessão expirada" });
+    res.status(401).json({ error: "Sua sessão terminou. Entre de novo para continuar." });
     return;
   }
   const { data: store, error: storeError } = await admin
@@ -27,7 +28,7 @@ export async function requireMerchant(req: Request, res: Response, next: NextFun
     .maybeSingle();
   if (storeError) {
     console.error("[auth] falha ao ler loja", storeError.message);
-    res.status(500).json({ error: "Não foi possível ler a loja." });
+    res.status(500).json({ error: "Não conseguimos abrir sua loja agora. Tente de novo." });
     return;
   }
   if (!store) {

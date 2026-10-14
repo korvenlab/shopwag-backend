@@ -79,7 +79,7 @@ mercadopagoRouter.get("/status", async (req, res) => {
   const pedidoId = String(req.query.pedido || "");
   const token = String(req.query.t || "");
   if (!isUuid(pedidoId) || !isUuid(token)) {
-    res.status(400).json({ error: "Pedido inválido" });
+    res.status(400).json({ error: "Pedido não encontrado." });
     return;
   }
   const result = await syncOrderPayment(pedidoId, token);
