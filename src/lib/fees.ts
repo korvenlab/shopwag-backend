@@ -19,17 +19,17 @@ export function serviceFeeCents(baseCents: number) {
 
 /**
  * Quanto o cliente paga: produtos + frete + taxa de serviço e, quando a loja repassa a taxa do
- * cartão, essa taxa por cima de tudo, para a loja receber o valor do catálogo.
+ * Mercado Pago, essa taxa por cima de tudo, para a loja receber o valor do catálogo.
  */
-export function chargeBreakdown(baseCents: number, cardFeePercent: number | null) {
+export function chargeBreakdown(baseCents: number, paymentFeePercent: number | null) {
   const base = Math.max(0, Math.round(baseCents));
   const service = serviceFeeCents(base);
   const subtotal = base + service;
-  if (cardFeePercent == null || subtotal <= 0) return { service, cardFee: 0, total: subtotal };
-  const denom = 1 - cardFeePercent / 100;
-  if (denom <= 0) throw new Error("Taxa de cartão inválida para repasse.");
+  if (paymentFeePercent == null || subtotal <= 0) return { service, paymentFee: 0, total: subtotal };
+  const denom = 1 - paymentFeePercent / 100;
+  if (denom <= 0) throw new Error("Taxa de pagamento inválida para repasse.");
   const total = Math.ceil(subtotal / denom);
-  return { service, cardFee: total - subtotal, total };
+  return { service, paymentFee: total - subtotal, total };
 }
 
 /** O Mercado Pago recusa marketplace_fee quando a loja é a própria conta da aplicação. */

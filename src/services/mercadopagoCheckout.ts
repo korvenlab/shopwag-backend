@@ -4,6 +4,7 @@ import {
   chargeBreakdown,
   DEFAULT_CREDIT_FEE_PERCENT,
   DEFAULT_DEBIT_FEE_PERCENT,
+  DEFAULT_PIX_FEE_PERCENT,
 } from "../lib/fees";
 import {
   mpCreatePreference,
@@ -67,11 +68,17 @@ const FEE_COLUMN: Record<string, string> = {
   debit_card: "taxa_debito_percent",
 };
 
-/** A taxa de serviço é sempre do cliente; a do cartão só quando a loja repassa. No Pix a taxa fica com a loja. */
+const FEE_BY_METHOD: Record<PayMethod, { field: keyof StoreRef; fallback: number }> = {
+  pix: { field: "taxa_pix_percent", fallback: DEFAULT_PIX_FEE_PERCENT },
+  credito: { field: "taxa_credito_percent", fallback: DEFAULT_CREDIT_FEE_PERCENT },
+  debito: { field: "taxa_debito_percent", fallback: DEFAULT_DEBIT_FEE_PERCENT },
+};
+
+/** A taxa de serviço é sempre do cliente; a do Mercado Pago (Pix ou cartão) só quando a loja repassa. */
 function chargeFor(store: StoreRef, totalCents: number, method: PayMethod) {
-  if (!store.repassar_taxas || method === "pix") return chargeBreakdown(totalCents, null);
-  const percent = Number(method === "credito" ? store.taxa_credito_percent : store.taxa_debito_percent);
-  const fallback = method === "credito" ? DEFAULT_CREDIT_FEE_PERCENT : DEFAULT_DEBIT_FEE_PERCENT;
+  if (!store.repassar_taxas) return chargeBreakdown(totalCents, null);
+  const { field, fallback } = FEE_BY_METHOD[method];
+  const percent = Number(store[field]);
   return chargeBreakdown(totalCents, Number.isFinite(percent) && percent >= 0 && percent < 20 ? percent : fallback);
 }
 

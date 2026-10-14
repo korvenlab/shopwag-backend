@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { test } from "node:test";
 import { chargeBreakdown, serviceFeeCents } from "./fees";
 
@@ -12,13 +12,13 @@ test("taxa de serviço mínima de 1 centavo", () => {
   assert.equal(serviceFeeCents(0), 0);
 });
 
-test("sem repasse do cartão o cliente paga só a taxa de serviço", () => {
-  assert.deepEqual(chargeBreakdown(10000, null), { service: 200, cardFee: 0, total: 10200 });
+test("sem repasse o cliente paga só a taxa de serviço", () => {
+  assert.deepEqual(chargeBreakdown(10000, null), { service: 200, paymentFee: 0, total: 10200 });
 });
 
-test("com repasse a loja fica com o valor do catálogo depois do cartão e da taxa de serviço", () => {
+test("com repasse a loja fica com o valor do catálogo depois do Mercado Pago e da taxa de serviço", () => {
   for (const base of [990, 10000, 15990, 123456]) {
-    for (const percent of [3.99, 4.98]) {
+    for (const percent of [0.99, 3.99, 4.98]) {
       const { service, total } = chargeBreakdown(base, percent);
       const mpFee = Math.round((total * percent) / 100);
       const store = total - mpFee - service;
@@ -29,5 +29,9 @@ test("com repasse a loja fica com o valor do catálogo depois do cartão e da ta
 });
 
 test("R$ 100,00 no crédito com repasse", () => {
-  assert.deepEqual(chargeBreakdown(10000, 4.98), { service: 200, cardFee: 535, total: 10735 });
+  assert.deepEqual(chargeBreakdown(10000, 4.98), { service: 200, paymentFee: 535, total: 10735 });
+});
+
+test("R$ 100,00 no Pix com repasse", () => {
+  assert.deepEqual(chargeBreakdown(10000, 0.99), { service: 200, paymentFee: 102, total: 10302 });
 });
