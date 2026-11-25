@@ -45,6 +45,45 @@ cp .env.example .env
 npm run dev
 ```
 
+## Testes
+
+```bash
+npm test
+```
+
+A suíte usa Jest e ts-jest. Ela cobre o cálculo em `src/lib/fees.ts` (taxa de serviço, repasse e marketplace fee da conta da aplicação) e a assinatura do webhook do Mercado Pago: `mpWebhookSignatureValid` e `POST /api/mercadopago/webhook`.
+
+Os testes não chamam o Mercado Pago nem o Supabase. O segredo do webhook é fictício, definido no próprio teste, e a sincronização do pagamento fica mockada. `npm test` não sobe o servidor e não precisa de `.env`.
+
+O build de produção continua `npm run build` (`tsc` do TypeScript 7). O pacote `typescript` no `package.json` aponta para a API de compatibilidade do TypeScript 6, que é o que o ts-jest importa. O binário `tsc` usado no Render vem de `@typescript/native` e segue na 7.
+
+## Kubernetes
+
+O deploy em produção continua no Render (`render.yaml`, runtime Node). O `Dockerfile` e a pasta `k8s/` são um extra para subir a mesma API num cluster local.
+
+Os manifests trazem Deployment, Service, ConfigMap e um Secret de exemplo (`k8s/secret.example.yaml`) com valores fictícios. A service role do Supabase não entra nesse Secret: sem ela, `GET /health` responde sem consultar o banco. As probes de liveness e readiness usam esse `/health`, que já existe. No Render, com a chave configurada, a mesma rota também verifica o Supabase.
+
+Com Docker e [Kind](https://kind.sigs.k8s.io/):
+
+```bash
+docker build -t shopwag-backend:local .
+kind create cluster --name shopwag
+kind load docker-image shopwag-backend:local --name shopwag
+kubectl apply -k k8s
+kubectl -n shopwag rollout status deployment/shopwag-backend
+kubectl -n shopwag port-forward svc/shopwag-backend 18080:80
+```
+
+Em outro terminal:
+
+```bash
+curl -sS http://127.0.0.1:18080/health
+```
+
+Para remover o cluster: `kind delete cluster --name shopwag`.
+
+O workflow `.github/workflows/ci.yml` roda em pull request e em push na `main`: `npm ci`, `npm run lint` se o script existir, `npm run build`, `npm test`, e um job que sobe um cluster Kind, aplica os manifests e consulta `/health`. Este repositório não tem script de lint. O keepalive do Render (`.github/workflows/keepalive.yml`) permanece separado.
+
 ## Schema
 
 ```bash
