@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: shopwag-backend
+  labels:
+    app: shopwag-backend
+spec:
+  selector:
+    app: shopwag-backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
