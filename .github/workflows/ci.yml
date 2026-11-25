@@ -1,0 +1,81 @@
+name: CI
+
+# Push na main e pull requests. O keepalive do Render fica em keepalive.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Install, build e testes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint --if-present
+      - run: npm run build
+      - run: npm test
+
+  kind:
+    name: Kind smoke /health
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar kubectl
+        run: |
+          set -euo pipefail
+          curl -fsSL -o kubectl https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
+          echo "6129359f4e1f3848a5572ccb0b26cf28b8ca08cef38c95a765b2f64a2c961a2f  kubectl" | sha256sum -c -
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      - name: Instalar o Kind
+        run: |
+          set -euo pipefail
+          curl -fsSL -o kind https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind" | sha256sum -c -
+          chmod +x kind
+          sudo mv kind /usr/local/bin/kind
+          kind version
+
+      - name: Criar o cluster
+        run: kind create cluster --name shopwag --wait 300s
+
+      - name: Construir e carregar a imagem
+        run: |
+          set -euo pipefail
+          docker build -t shopwag-backend:local .
+          kind load docker-image shopwag-backend:local --name shopwag
+
+      - name: Aplicar os manifests e consultar /health
+        run: |
+          set -euo pipefail
+          kubectl apply -k k8s
+          kubectl -n shopwag rollout status deployment/shopwag-backend --timeout=180s
+          kubectl -n shopwag exec deployment/shopwag-backend -- node -e 'fetch("http://127.0.0.1:"+(process.env.PORT||"10000")+"/health").then(async r=>{const b=await r.text(); console.log(b); const j=JSON.parse(b); if(!r.ok||j.ok!==true||j.database!=="missing_secret") process.exit(1)}).catch(e=>{console.error(e); process.exit(1)})'
+          kubectl -n shopwag exec deployment/shopwag-backend -- node -e 'fetch("http://shopwag-backend/health").then(async r=>{const b=await r.text(); console.log(b); if(!r.ok) process.exit(1)}).catch(e=>{console.error(e); process.exit(1)})'
+
+      - name: Diagnóstico se o smoke falhar
+        if: failure()
+        run: |
+          kubectl -n shopwag describe deployment shopwag-backend || true
+          kubectl -n shopwag get pods -o wide || true
+          kubectl -n shopwag logs -l app=shopwag-backend --all-containers --tail=200 || true
