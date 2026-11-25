@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shopwag-backend-config
+  labels:
+    app: shopwag-backend
+data:
+  PORT: "10000"
+  NODE_ENV: "production"
+  # Host fictício. A chave do Supabase não vai no Secret de exemplo, então /health não consulta isso.
+  SUPABASE_URL: "https://example.invalid"
+  FRONTEND_URL: "http://localhost:3000"
+  CORS_ORIGINS: "http://localhost:3000"
+  MP_OAUTH_REDIRECT_URI: "http://localhost:10000/api/mercadopago/oauth/callback"
+  MP_WEBHOOK_URL: "http://localhost:10000/api/mercadopago/webhook"
+  MP_OAUTH_TEST_TOKEN: "false"
+  STORE_DOMAIN: "example.test"

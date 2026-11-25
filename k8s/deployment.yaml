@@ -1,0 +1,57 @@
+# Exemplo de portfólio. A produção do Shopwag segue no Render (render.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shopwag-backend
+  labels:
+    app: shopwag-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shopwag-backend
+  template:
+    metadata:
+      labels:
+        app: shopwag-backend
+    spec:
+      containers:
+        - name: api
+          image: shopwag-backend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 10000
+          envFrom:
+            - configMapRef:
+                name: shopwag-backend-config
+            - secretRef:
+                name: shopwag-backend-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+          # Pedido só para o cluster local. Não é medição de produção.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi

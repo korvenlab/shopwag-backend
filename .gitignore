@@ -1,8 +1,10 @@
 node_modules/
 dist/
+coverage/
 supabase/.temp/
 supabase/.branches/
 .env
 .env.*
 !.env.example
 *.dump
+k8s/secret.yaml
